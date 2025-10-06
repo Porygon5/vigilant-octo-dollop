@@ -1,0 +1,39 @@
+{
+  "name": "discord-ai-controller",
+  "version": "2.0.0",
+  "description": "Bot Telegram avec IA pour contrôler Discord - Interface stylée et fonctionnalités avancées",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "dm-extractor": "node dmExtractorSimple.js",
+    "dm-advanced": "node dmExtractorAdvanced.js",
+    "test": "node test_simple.js",
+    "stop": "node stop_bot.js",
+    "install:deps": "npm install discord.js-selfbot-v13 debug node-telegram-bot-api openai express cors dotenv"
+  },
+  "keywords": [
+    "discord",
+    "telegram",
+    "ai",
+    "selfbot",
+    "automation",
+    "bot",
+    "openai",
+    "controller"
+  ],
+  "author": "Discord AI Team",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "debug": "^4.4.3",
+    "discord.js-selfbot-v13": "^3.7.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^6.2.0"
+  },
+  "engines": {
+    "node": ">=20.18"
+  }
+}

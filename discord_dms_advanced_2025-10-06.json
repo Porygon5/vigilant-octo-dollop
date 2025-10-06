@@ -1,0 +1,66 @@
+{
+  "channels": [
+    {
+      "id": "1424849483216326687",
+      "type": "DM",
+      "name": "DM Privé",
+      "recipient": {
+        "id": "1409641466363383839",
+        "username": "Café Français",
+        "discriminator": "3055",
+        "tag": "Café Français#3055"
+      },
+      "createdTimestamp": 1759780989222,
+      "messages": [
+        {
+          "id": "1424849488488693770",
+          "content": "test",
+          "author": {
+            "id": "1424402133712633856",
+            "username": "porygon0521",
+            "discriminator": "0",
+            "tag": "porygon0521",
+            "bot": false
+          },
+          "timestamp": 1759780990479,
+          "editedTimestamp": null,
+          "type": "DEFAULT",
+          "mentions": {
+            "users": [],
+            "channels": []
+          }
+        }
+      ]
+    }
+  ],
+  "totalMessages": 1,
+  "exportDate": "2025-10-06T20:06:05.481Z",
+  "options": {
+    "maxMessagesPerChannel": 5000,
+    "delayBetweenRequests": 1000,
+    "exportFormat": "json",
+    "includeAttachments": true,
+    "includeEmbeds": true,
+    "includeReactions": true,
+    "filterByDate": null,
+    "filterByUser": null,
+    "token": "MTQyNDQwMjEzMzcxMjYzMzg1Ng.GPPZi3.vKSJnU4W9V0meH9QgMT5l8QQb41wlqNTjHsREs"
+  },
+  "stats": {
+    "totalChannels": 1,
+    "messagesByChannel": {
+      "1424849483216326687": 1
+    },
+    "oldestMessage": 1759780990479,
+    "newestMessage": 1759780990479,
+    "messagesByUser": {
+      "1424402133712633856": {
+        "username": "porygon0521",
+        "tag": "porygon0521",
+        "count": 1
+      }
+    },
+    "attachments": 0,
+    "embeds": 0
+  }
+}
