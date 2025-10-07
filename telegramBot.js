@@ -1,158 +1,109 @@
 const TelegramBot = require('node-telegram-bot-api');
-const fs = require('fs');
 
-class DiscordAITelegramBot {
+class UltraTelegramBot {
     constructor(token, discordController, aiProcessor) {
         this.bot = new TelegramBot(token, { polling: true });
         this.discordController = discordController;
         this.aiProcessor = aiProcessor;
-        this.userStates = new Map();
+        this.userContexts = new Map();
         this.setupBot();
     }
 
     setupBot() {
-        console.log('🤖 Initialisation du bot Telegram...');
+        console.log('🤖 Initialisation du Bot Telegram Ultra-Riche...');
 
-        // Menu principal stylé
+        // Commande /start
         this.bot.onText(/\/start/, (msg) => {
-            const chatId = msg.chat.id;
-            const welcomeMessage = `
-🚀 *Discord AI Controller* 🤖
-
-✨ *Bienvenue dans votre centre de contrôle Discord IA !*
-
-🎮 *Commandes disponibles :*
-• /menu - Menu principal interactif
-• /status - État de Discord
-• /help - Aide complète
-
-💬 *Ou tapez simplement votre demande :*
-"Répond 'salut' à Anthony0707"
-"Envoie un message sur le serveur Gaming"
-"Montre-moi les derniers messages"
-
-🔥 *Interface stylée en cours de chargement...*
-            `;
-
-            this.sendStyledMessage(chatId, welcomeMessage);
-            this.showMainMenu(chatId);
+            this.showWelcome(msg.chat.id);
         });
 
-        // Menu interactif
+        // Commande /menu
         this.bot.onText(/\/menu/, (msg) => {
             this.showMainMenu(msg.chat.id);
         });
 
-        // Statut Discord
+        // Commande /status
         this.bot.onText(/\/status/, async (msg) => {
-            const chatId = msg.chat.id;
-            await this.showDiscordStatus(chatId);
+            await this.showStatus(msg.chat.id);
         });
 
-        // Aide
+        // Commande /friends
+        this.bot.onText(/\/friends/, async (msg) => {
+            await this.showFriends(msg.chat.id);
+        });
+
+        // Commande /servers
+        this.bot.onText(/\/servers/, async (msg) => {
+            await this.showServers(msg.chat.id);
+        });
+
+        // Commande /help
         this.bot.onText(/\/help/, (msg) => {
-            const chatId = msg.chat.id;
-            this.showHelp(chatId);
+            this.showHelp(msg.chat.id);
         });
 
-        // Gestion des boutons inline
-        this.bot.on('callback_query', async (callbackQuery) => {
-            const chatId = callbackQuery.message.chat.id;
-            const data = callbackQuery.data;
-
-            try {
-                // Vérifier si la query est encore valide (pas trop ancienne)
-                const queryAge = Date.now() - callbackQuery.message.date * 1000;
-                if (queryAge < 60000) { // Moins d'1 minute
-                    await this.bot.answerCallbackQuery(callbackQuery.id);
-                }
-            } catch (error) {
-                console.error('Erreur callback query:', error.message);
-                // Ignorer les erreurs de callback query anciennes
-            }
-
-            switch (data) {
-                case 'quick_message':
-                    this.showQuickMessageMenu(chatId);
-                    break;
-                case 'discord_status':
-                    await this.showDiscordStatus(chatId);
-                    break;
-                case 'recent_messages':
-                    await this.showRecentMessages(chatId);
-                    break;
-                case 'servers':
-                    await this.showServersList(chatId);
-                    break;
-                case 'ai_chat':
-                    this.startAIChat(chatId);
-                    break;
-                case 'back_to_menu':
-                    this.showMainMenu(chatId);
-                    break;
-            }
+        // Commande /clear
+        this.bot.onText(/\/clear/, (msg) => {
+            this.aiProcessor.clearConversation(msg.chat.id);
+            this.sendMessage(msg.chat.id, '🗑️ Historique de conversation effacé !');
         });
 
-        // Traitement des messages textuels (IA)
+        // Gestion des boutons callback
+        this.bot.on('callback_query', async (query) => {
+            await this.handleCallback(query);
+        });
+
+        // Traitement des messages
         this.bot.on('message', async (msg) => {
             if (msg.text && !msg.text.startsWith('/')) {
-                await this.processAIMessage(msg);
+                await this.handleUserMessage(msg);
             }
         });
 
         // Gestion des erreurs
         this.bot.on('error', (error) => {
-            console.error('❌ Erreur bot Telegram:', error.message);
-            if (error.code === 'ETELEGRAM' && error.response?.body?.description?.includes('409')) {
-                console.log('⚠️ Une autre instance du bot est déjà en cours d\'exécution');
+            if (!error.message.includes('ETELEGRAM')) {
+                console.error('❌ Erreur Telegram:', error.message);
             }
         });
 
-        // Gestion des erreurs de polling
         this.bot.on('polling_error', (error) => {
-            console.error('❌ Erreur polling Telegram:', error.message);
-            if (error.code === 'ETELEGRAM') {
-                if (error.response?.body?.description?.includes('409')) {
-                    console.log('⚠️ Conflit: Une autre instance du bot utilise déjà ce token');
-                } else if (error.response?.body?.description?.includes('400')) {
-                    console.log('⚠️ Erreur de requête Telegram - Ignorée');
-                }
+            if (!error.message.includes('409') && !error.message.includes('400')) {
+                console.error('❌ Erreur polling:', error.message);
             }
         });
 
-        console.log('✅ Bot Telegram initialisé avec succès !');
+        console.log('✅ Bot Telegram initialisé !');
     }
 
-    async sendStyledMessage(chatId, text, options = {}) {
-        const defaultOptions = {
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-        };
+    // ========== AFFICHAGE DES MENUS ==========
+    
+    showWelcome(chatId) {
+        const welcome = `
+🎉 *BIENVENUE DANS DISCORD AI MASTER* 🎉
 
-        try {
-            // Échapper les caractères Markdown problématiques
-            const safeText = text
-                .replace(/\\/g, '\\\\')  // Échapper les backslashes
-                .replace(/\[/g, '\\[')   // Échapper les crochets
-                .replace(/\]/g, '\\]')
-                .replace(/\(/g, '\\(')   // Échapper les parenthèses
-                .replace(/\)/g, '\\)')
-                .replace(/_/g, '\\_')    // Échapper les underscores
-                .replace(/\*/g, '\\*')   // Échapper les astérisques
-                .replace(/`/g, '\\`');   // Échapper les backticks
-            
-            await this.bot.sendMessage(chatId, safeText, { ...defaultOptions, ...options });
-        } catch (error) {
-            console.error('Erreur envoi message:', error.message);
-            // Fallback sans Markdown
-            const plainText = text.replace(/[*_`\[\]()]/g, '');
-            await this.bot.sendMessage(chatId, plainText, { disable_web_page_preview: true });
-        }
+🚀 Le contrôleur Discord le plus puissant du monde !
+
+🔥 *Fonctionnalités :*
+✅ Envoyer des messages et DMs
+✅ Ajouter/retirer des amis
+✅ Rejoindre/quitter des serveurs
+✅ Réagir aux messages
+✅ Changer de statut
+✅ Et bien plus encore...
+
+🧠 *IA Ultra-Réaliste :*
+Parlez naturellement, l'IA comprend tout !
+
+📱 *Tapez /menu pour commencer*
+        `;
+
+        this.sendMessage(chatId, welcome);
     }
 
     showMainMenu(chatId) {
-        const menuText = `
-🎯 *MENU PRINCIPAL* 🎯
+        const menu = `
+🎯 *MENU PRINCIPAL*
 
 Choisissez une action :
         `;
@@ -160,260 +111,434 @@ Choisissez une action :
         const keyboard = {
             inline_keyboard: [
                 [
-                    { text: '💬 Message Rapide', callback_data: 'quick_message' },
-                    { text: '📊 Statut Discord', callback_data: 'discord_status' }
+                    { text: '💬 Envoyer Message', callback_data: 'action_message' },
+                    { text: '👥 Gérer Amis', callback_data: 'action_friends' }
                 ],
                 [
-                    { text: '📨 Messages Récents', callback_data: 'recent_messages' },
-                    { text: '🏠 Serveurs', callback_data: 'servers' }
+                    { text: '🏠 Gérer Serveurs', callback_data: 'action_servers' },
+                    { text: '📨 Messages Récents', callback_data: 'action_recent' }
                 ],
                 [
-                    { text: '🤖 Chat IA', callback_data: 'ai_chat' },
-                    { text: '❓ Aide', callback_data: 'help' }
+                    { text: '⚙️ Paramètres', callback_data: 'action_settings' },
+                    { text: '📊 Statut Discord', callback_data: 'action_status' }
+                ],
+                [
+                    { text: '🤖 Mode IA', callback_data: 'action_ai' },
+                    { text: '❓ Aide', callback_data: 'action_help' }
                 ]
             ]
         };
 
-        this.bot.sendMessage(chatId, menuText, {
-            reply_markup: keyboard,
-            parse_mode: 'Markdown'
+        this.bot.sendMessage(chatId, menu, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
         });
     }
 
-    showQuickMessageMenu(chatId) {
-        const quickText = `
-⚡ *MESSAGE RAPIDE* ⚡
-
-🎯 *Actions rapides disponibles :*
-
-• *Répondre à quelqu'un :*
-  "Répond 'salut' à @username"
-
-• *Envoyer un message :*
-  "Envoie 'bonjour tout le monde' sur #general"
-
-• *Mentionner quelqu'un :*
-  "Dis à @admin de venir"
-
-• *Réaction :*
-  "Réagis avec 👍 au dernier message"
-
-💡 *Tapez votre commande maintenant !*
-        `;
-
-        const keyboard = {
-            inline_keyboard: [
-                [{ text: '🔙 Retour au Menu', callback_data: 'back_to_menu' }]
-            ]
-        };
-
-        this.bot.sendMessage(chatId, quickText, {
-            reply_markup: keyboard,
-            parse_mode: 'Markdown'
-        });
-    }
-
-    async showDiscordStatus(chatId) {
+    async showStatus(chatId) {
         try {
-            const status = await this.discordController.getStatus();
+            const connected = this.discordController.getConnectionStatus();
             
-            const statusText = `
-📊 *STATUT DISCORD* 📊
+            if (!connected) {
+                this.sendMessage(chatId, '❌ Discord déconnecté !');
+                return;
+            }
 
-🤖 **Utilisateur :** ${status.username}
-🆔 **ID :** \`${status.id}\`
-🟢 **Statut :** ${status.status}
-📱 **Plateforme :** ${status.platform}
+            const client = this.discordController.getClient();
+            const friends = await this.discordController.getFriends();
+            const servers = await this.discordController.getAllServers();
 
-🏠 **Serveurs :** ${status.guilds}
-💬 **Channels :** ${status.channels}
-👥 **Utilisateurs :** ${status.users}
+            const status = `
+📊 *STATUT DISCORD*
 
-⚡ **Statut IA :** ${status.aiEnabled ? '🟢 Actif' : '🔴 Inactif'}
+👤 *Compte :* ${client.user.tag}
+🆔 *ID :* \`${client.user.id}\`
+
+📈 *Statistiques :*
+👥 Amis : ${friends.length}
+🏠 Serveurs : ${servers.length}
+💬 Channels : ${client.channels.cache.size}
+
+🟢 *Statut :* En ligne
+⚡ *IA :* Activée
+
+🔋 *Requêtes IA :* ${this.aiProcessor.getStats().requestsUsed}
+💰 *Coût estimé :* $${this.aiProcessor.getStats().estimatedCost}
             `;
 
             const keyboard = {
                 inline_keyboard: [
-                    [{ text: '🔄 Actualiser', callback_data: 'discord_status' }],
-                    [{ text: '🔙 Retour au Menu', callback_data: 'back_to_menu' }]
+                    [{ text: '🔄 Actualiser', callback_data: 'action_status' }],
+                    [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
                 ]
             };
 
-            this.bot.sendMessage(chatId, statusText, {
-                reply_markup: keyboard,
-                parse_mode: 'Markdown'
+            this.bot.sendMessage(chatId, status, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
             });
 
         } catch (error) {
-            this.sendStyledMessage(chatId, `❌ Erreur : ${error.message}`);
+            this.sendMessage(chatId, `❌ Erreur : ${error.message}`);
         }
     }
 
-    async showRecentMessages(chatId) {
+    async showFriends(chatId) {
         try {
-            const messages = await this.discordController.getRecentMessages(10);
-            
-            let messagesText = `📨 *MESSAGES RÉCENTS* 📨\n\n`;
-            
-            messages.forEach((msg, index) => {
-                const time = new Date(msg.timestamp).toLocaleTimeString();
-                messagesText += `${index + 1}. **${msg.author}** (${time})\n`;
-                messagesText += `   📍 ${msg.channel}\n`;
-                messagesText += `   💬 ${msg.content.substring(0, 50)}${msg.content.length > 50 ? '...' : ''}\n\n`;
-            });
+            const friends = await this.discordController.getFriends();
 
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '🔄 Actualiser', callback_data: 'recent_messages' }],
-                    [{ text: '🔙 Retour au Menu', callback_data: 'back_to_menu' }]
-                ]
-            };
-
-            this.bot.sendMessage(chatId, messagesText, {
-                reply_markup: keyboard,
-                parse_mode: 'Markdown'
-            });
-
-        } catch (error) {
-            this.sendStyledMessage(chatId, `❌ Erreur : ${error.message}`);
-        }
-    }
-
-    async showServersList(chatId) {
-        try {
-            const servers = await this.discordController.getServers();
-            
-            let serversText = `🏠 *SERVEURS DISCORD* 🏠\n\n`;
-            
-            servers.forEach((server, index) => {
-                serversText += `${index + 1}. **${server.name}**\n`;
-                serversText += `   👥 ${server.memberCount} membres\n`;
-                serversText += `   📊 ${server.channels.length} channels\n\n`;
-            });
-
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '🔄 Actualiser', callback_data: 'servers' }],
-                    [{ text: '🔙 Retour au Menu', callback_data: 'back_to_menu' }]
-                ]
-            };
-
-            this.bot.sendMessage(chatId, serversText, {
-                reply_markup: keyboard,
-                parse_mode: 'Markdown'
-            });
-
-        } catch (error) {
-            this.sendStyledMessage(chatId, `❌ Erreur : ${error.message}`);
-        }
-    }
-
-    startAIChat(chatId) {
-        this.userStates.set(chatId, 'ai_chat');
-        
-        const aiText = `
-🤖 *CHAT IA ACTIVÉ* 🤖
-
-💬 *Mode IA activé ! Tapez vos commandes naturelles :*
-
-Exemples :
-• "Répond 'd'accord' à Anthony0707"
-• "Envoie un message sur le serveur Gaming"
-• "Montre-moi les messages de #general"
-• "Réagis avec 👍 au dernier message"
-
-🎯 *L'IA comprendra et exécutera vos demandes !*
-
-Pour désactiver : /menu
-        `;
-
-        this.sendStyledMessage(chatId, aiText);
-    }
-
-    async processAIMessage(msg) {
-        const chatId = msg.chat.id;
-        const userText = msg.text;
-        const userState = this.userStates.get(chatId);
-
-        // Indicateur de frappe
-        await this.bot.sendChatAction(chatId, 'typing');
-
-        try {
-            if (userState === 'ai_chat' || this.looksLikeCommand(userText)) {
-                // Traitement par IA
-                const response = await this.aiProcessor.processCommand(userText, chatId);
-                
-                if (response.success) {
-                    this.sendStyledMessage(chatId, `✅ ${response.message}`);
-                } else {
-                    this.sendStyledMessage(chatId, `❌ ${response.message}`);
-                }
-            } else {
-                // Message normal
-                this.sendStyledMessage(chatId, `💬 Message reçu : "${userText}"\n\nUtilisez /menu pour les options avancées !`);
+            if (friends.length === 0) {
+                this.sendMessage(chatId, '😔 Vous n\'avez pas encore d\'amis');
+                return;
             }
+
+            let friendsList = `👥 *VOS AMIS* (${friends.length})\n\n`;
+
+            friends.forEach((friend, index) => {
+                friendsList += `${index + 1}. **${friend.tag}**\n`;
+                friendsList += `   ID: \`${friend.id}\`\n\n`;
+            });
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '➕ Ajouter Ami', callback_data: 'action_add_friend' }],
+                    [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
+                ]
+            };
+
+            this.bot.sendMessage(chatId, friendsList, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+
         } catch (error) {
-            this.sendStyledMessage(chatId, `❌ Erreur IA : ${error.message}`);
+            this.sendMessage(chatId, `❌ Erreur : ${error.message}`);
         }
     }
 
-    looksLikeCommand(text) {
-        const commandPatterns = [
-            /répond/i,
-            /envoie/i,
-            /dis à/i,
-            /montre/i,
-            /réagis/i,
-            /écris/i,
-            /message/i,
-            /dm/i
-        ];
-        
-        return commandPatterns.some(pattern => pattern.test(text));
+    async showServers(chatId) {
+        try {
+            const servers = await this.discordController.getAllServers();
+
+            if (servers.length === 0) {
+                this.sendMessage(chatId, '😔 Vous n\'êtes sur aucun serveur');
+                return;
+            }
+
+            let serversList = `🏠 *VOS SERVEURS* (${servers.length})\n\n`;
+
+            servers.forEach((server, index) => {
+                serversList += `${index + 1}. **${server.name}**\n`;
+                serversList += `   👥 ${server.memberCount} membres\n`;
+                serversList += `   ID: \`${server.id}\`\n\n`;
+            });
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '➕ Rejoindre Serveur', callback_data: 'action_join_server' }],
+                    [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
+                ]
+            };
+
+            this.bot.sendMessage(chatId, serversList, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            this.sendMessage(chatId, `❌ Erreur : ${error.message}`);
+        }
     }
 
     showHelp(chatId) {
-        const helpText = `
-❓ *AIDE COMPLÈTE* ❓
+        const help = `
+❓ *GUIDE D'UTILISATION*
 
-🤖 *Commandes IA Naturelles :*
-• "Répond 'message' à @utilisateur"
-• "Envoie 'texte' sur #channel"
-• "Dis à @admin de venir"
-• "Montre les messages de #general"
-• "Réagis avec 👍 au dernier message"
+🎯 *Commandes Naturelles IA :*
+
+📨 *Messages :*
+• "Envoie un DM à username avec le message..."
+• "Dis bonjour à username sur Discord"
+• "Écris à username : ton message ici"
+
+👥 *Amis :*
+• "Ajoute username en ami"
+• "Retire username de mes amis"
+• "Montre-moi mes amis"
+
+🏠 *Serveurs :*
+• "Rejoins le serveur avec le code XXX"
+• "Quitte le serveur YYY"
+• "Montre mes serveurs"
 
 ⚡ *Actions Rapides :*
-• /menu - Menu principal
-• /status - Statut Discord
-• /help - Cette aide
+• "Réagis avec 👍 au dernier message"
+• "Change mon statut en occupé"
+• "Montre les messages récents"
 
-🎯 *Fonctionnalités Avancées :*
-• Statut "en train d'écrire"
-• Upload de fichiers
-• Gestion des serveurs
-• Messages en temps réel
-• Interface stylée
+🧠 *L'IA comprend le langage naturel !*
+Parlez comme à un humain, elle s'adapte.
 
-💡 *Astuce :* L'IA comprend le langage naturel !
+📱 *Commandes :*
+/menu - Menu principal
+/status - Statut Discord
+/friends - Liste des amis
+/servers - Liste des serveurs
+/clear - Effacer l'historique IA
+/help - Cette aide
         `;
 
         const keyboard = {
             inline_keyboard: [
-                [{ text: '🔙 Retour au Menu', callback_data: 'back_to_menu' }]
+                [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
             ]
         };
 
-        this.bot.sendMessage(chatId, helpText, {
-            reply_markup: keyboard,
-            parse_mode: 'Markdown'
+        this.bot.sendMessage(chatId, help, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
         });
     }
 
-    async notifyDiscordAction(action, result) {
-        // Notification pour les actions Discord importantes
-        console.log(`📢 Discord Action: ${action} - ${result}`);
+    // ========== GESTION DES CALLBACKS ==========
+    
+    async handleCallback(query) {
+        const chatId = query.message.chat.id;
+        const data = query.data;
+
+        try {
+            await this.bot.answerCallbackQuery(query.id);
+        } catch (error) {
+            // Ignorer les erreurs de callback anciennes
+        }
+
+        switch (data) {
+            case 'action_menu':
+                this.showMainMenu(chatId);
+                break;
+            case 'action_message':
+                this.promptSendMessage(chatId);
+                break;
+            case 'action_friends':
+                await this.showFriends(chatId);
+                break;
+            case 'action_servers':
+                await this.showServers(chatId);
+                break;
+            case 'action_recent':
+                await this.showRecentMessages(chatId);
+                break;
+            case 'action_settings':
+                this.showSettings(chatId);
+                break;
+            case 'action_status':
+                await this.showStatus(chatId);
+                break;
+            case 'action_ai':
+                this.activateAIMode(chatId);
+                break;
+            case 'action_help':
+                this.showHelp(chatId);
+                break;
+            case 'action_add_friend':
+                this.promptAddFriend(chatId);
+                break;
+            case 'action_join_server':
+                this.promptJoinServer(chatId);
+                break;
+        }
+    }
+
+    // ========== INTERACTIONS UTILISATEUR ==========
+    
+    promptSendMessage(chatId) {
+        this.userContexts.set(chatId, { mode: 'send_message' });
+        this.sendMessage(chatId, '💬 *Envoi de Message*\n\nQui voulez-vous contacter et que voulez-vous dire ?\n\nExemple: "Envoie à @username : Salut ça va ?"');
+    }
+
+    promptAddFriend(chatId) {
+        this.userContexts.set(chatId, { mode: 'add_friend' });
+        this.sendMessage(chatId, '👥 *Ajout d\'Ami*\n\nQuel est le nom d\'utilisateur à ajouter ?\n\nExemple: "username" ou "Ajoute username en ami"');
+    }
+
+    promptJoinServer(chatId) {
+        this.userContexts.set(chatId, { mode: 'join_server' });
+        this.sendMessage(chatId, '🏠 *Rejoindre un Serveur*\n\nQuel est le code d\'invitation ?\n\nExemple: "discord.gg/XXXXX" ou juste "XXXXX"');
+    }
+
+    activateAIMode(chatId) {
+        this.userContexts.set(chatId, { mode: 'ai_active' });
+        this.sendMessage(chatId, `
+🤖 *MODE IA ACTIVÉ*
+
+L'IA est maintenant à votre écoute !
+Parlez naturellement, elle comprendra.
+
+💡 *Exemples :*
+• "Ajoute John en ami puis dis-lui bonjour"
+• "Rejoins ce serveur et envoie un message sur #général"
+• "Montre-moi les derniers messages de mes amis"
+
+Pour désactiver : /menu
+        `);
+    }
+
+    async showRecentMessages(chatId) {
+        try {
+            const messages = this.discordController.messageHistory.slice(0, 10);
+
+            if (messages.length === 0) {
+                this.sendMessage(chatId, '📭 Aucun message récent');
+                return;
+            }
+
+            let messageText = `📨 *MESSAGES RÉCENTS*\n\n`;
+
+            messages.forEach((msg, index) => {
+                const time = new Date(msg.timestamp).toLocaleTimeString('fr-FR');
+                messageText += `${index + 1}. **${msg.author}** (${time})\n`;
+                messageText += `   📍 ${msg.channel}\n`;
+                messageText += `   💬 ${msg.content.substring(0, 80)}...\n\n`;
+            });
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '🔄 Actualiser', callback_data: 'action_recent' }],
+                    [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
+                ]
+            };
+
+            this.bot.sendMessage(chatId, messageText, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            this.sendMessage(chatId, `❌ Erreur : ${error.message}`);
+        }
+    }
+
+    showSettings(chatId) {
+        const settings = `
+⚙️ *PARAMÈTRES*
+
+🧠 *IA :*
+• Modèle : ${process.env.AI_MODEL}
+• Tokens max : ${process.env.AI_MAX_TOKENS}
+• Température : ${process.env.AI_TEMPERATURE}
+
+🔋 *Utilisation :*
+• Requêtes : ${this.aiProcessor.getStats().requestsUsed}
+• Coût : $${this.aiProcessor.getStats().estimatedCost}
+
+📱 *Actions :*
+        `;
+
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '🗑️ Effacer Historique IA', callback_data: 'action_clear_history' }],
+                [{ text: '🔙 Menu Principal', callback_data: 'action_menu' }]
+            ]
+        };
+
+        this.bot.sendMessage(chatId, settings, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+
+    // ========== TRAITEMENT DES MESSAGES ==========
+    
+    async handleUserMessage(msg) {
+        const chatId = msg.chat.id;
+        const text = msg.text;
+
+        // Indicateur de frappe
+        await this.bot.sendChatAction(chatId, 'typing');
+
+        const context = this.userContexts.get(chatId);
+
+        // Mode IA toujours actif par défaut
+        if (!context || context.mode === 'ai_active' || this.looksLikeCommand(text)) {
+            await this.processWithAI(chatId, text);
+        } else {
+            // Contextes spécifiques
+            await this.handleContextMessage(chatId, text, context);
+        }
+    }
+
+    async processWithAI(chatId, text) {
+        try {
+            console.log(`🧠 Traitement IA pour: "${text}"`);
+            
+            const response = await this.aiProcessor.processCommand(text, chatId);
+            
+            if (response.success) {
+                this.sendMessage(chatId, `✅ ${response.message}`);
+                
+                // Afficher les détails si disponibles
+                if (response.results && response.results.length > 0) {
+                    const details = response.results
+                        .filter(r => r.success !== false)
+                        .map(r => `• ${r.action}: ${r.message}`)
+                        .join('\n');
+                    
+                    if (details) {
+                        this.sendMessage(chatId, `📝 Détails:\n${details}`);
+                    }
+                }
+            } else {
+                this.sendMessage(chatId, `❌ ${response.message}`);
+            }
+
+        } catch (error) {
+            console.error('Erreur traitement IA:', error);
+            this.sendMessage(chatId, `❌ Erreur : ${error.message}`);
+        }
+    }
+
+    async handleContextMessage(chatId, text, context) {
+        // Gérer les contextes spécifiques
+        // À implémenter si nécessaire
+        await this.processWithAI(chatId, text);
+    }
+
+    looksLikeCommand(text) {
+        const patterns = [
+            /envoie|envoye|envois/i,
+            /dis|dit/i,
+            /ajoute|rajoute/i,
+            /rejoins|join/i,
+            /montre|affiche/i,
+            /réagis|react/i,
+            /change|modifie/i
+        ];
+        
+        return patterns.some(p => p.test(text));
+    }
+
+    // ========== UTILITAIRES ==========
+    
+    async sendMessage(chatId, text) {
+        try {
+            // Échapper les caractères Markdown
+            const safeText = text
+                .replace(/\\/g, '\\\\')
+                .replace(/\[/g, '\\[')
+                .replace(/\]/g, '\\]')
+                .replace(/\(/g, '\\(')
+                .replace(/\)/g, '\\)');
+            
+            await this.bot.sendMessage(chatId, safeText, { 
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true 
+            });
+        } catch (error) {
+            // Fallback sans Markdown
+            const plainText = text.replace(/[*_`\[\]()]/g, '');
+            await this.bot.sendMessage(chatId, plainText);
+        }
     }
 }
 
-module.exports = DiscordAITelegramBot;
+module.exports = UltraTelegramBot;

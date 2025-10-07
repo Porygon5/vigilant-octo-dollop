@@ -1,11 +1,11 @@
 require('dotenv').config({ path: './config.env' });
-const DiscordAIController = require('./discordController');
-const DiscordAIProcessor = require('./aiProcessor');
-const DiscordAITelegramBot = require('./telegramBot');
+const UltraDiscordController = require('./discordController');
+const AdvancedAIProcessor = require('./aiProcessor');
+const UltraTelegramBot = require('./telegramBot');
 const express = require('express');
 const cors = require('cors');
 
-class DiscordAIApp {
+class DiscordAIMasterApp {
     constructor() {
         this.app = express();
         this.port = process.env.PORT || 3000;
@@ -15,13 +15,11 @@ class DiscordAIApp {
         this.isRunning = false;
         
         this.setupExpress();
-        this.setupComponents();
     }
 
     setupExpress() {
         this.app.use(cors());
         this.app.use(express.json());
-        this.app.use(express.static('public'));
 
         // Route de santé
         this.app.get('/health', (req, res) => {
@@ -30,45 +28,133 @@ class DiscordAIApp {
                 discord: this.discordController?.getConnectionStatus() || false,
                 telegram: this.telegramBot ? true : false,
                 ai: this.aiProcessor ? true : false,
-                uptime: process.uptime()
+                uptime: process.uptime(),
+                version: '2.0.0-ultra'
             });
         });
 
-        // Route de statistiques
+        // Route de statistiques IA
         this.app.get('/stats', (req, res) => {
             if (this.aiProcessor) {
-                res.json(this.aiProcessor.getStats());
+                res.json({
+                    ai: this.aiProcessor.getStats(),
+                    discord: {
+                        connected: this.discordController?.getConnectionStatus(),
+                        messageHistory: this.discordController?.messageHistory.length || 0
+                    }
+                });
             } else {
-                res.json({ error: 'AI Processor not initialized' });
+                res.status(503).json({ error: 'AI Processor not initialized' });
             }
         });
 
-        // Route de contrôle
-        this.app.post('/control', (req, res) => {
-            const { action, data } = req.body;
-            
-            switch (action) {
-                case 'start':
-                    this.start();
-                    res.json({ success: true, message: 'System started' });
-                    break;
-                case 'stop':
-                    this.stop();
-                    res.json({ success: true, message: 'System stopped' });
-                    break;
-                case 'restart':
-                    this.restart();
-                    res.json({ success: true, message: 'System restarted' });
-                    break;
-                default:
-                    res.json({ success: false, message: 'Unknown action' });
+        // Route pour envoyer un message via API
+        this.app.post('/api/send-message', async (req, res) => {
+            try {
+                const { channelId, message } = req.body;
+                
+                if (!channelId || !message) {
+                    return res.status(400).json({ error: 'channelId et message requis' });
+                }
+
+                const result = await this.discordController.sendMessage(channelId, message);
+                res.json({ success: true, messageId: result.id });
+                
+            } catch (error) {
+                res.status(500).json({ error: error.message });
             }
+        });
+
+        // Route pour envoyer un DM via API
+        this.app.post('/api/send-dm', async (req, res) => {
+            try {
+                const { userId, message } = req.body;
+                
+                if (!userId || !message) {
+                    return res.status(400).json({ error: 'userId et message requis' });
+                }
+
+                const result = await this.discordController.sendDM(userId, message);
+                res.json({ success: true, messageId: result.id });
+                
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Route pour ajouter un ami via API
+        this.app.post('/api/add-friend', async (req, res) => {
+            try {
+                const { username } = req.body;
+                
+                if (!username) {
+                    return res.status(400).json({ error: 'username requis' });
+                }
+
+                const result = await this.discordController.addFriendByUsername(username);
+                res.json(result);
+                
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Route pour rejoindre un serveur via API
+        this.app.post('/api/join-server', async (req, res) => {
+            try {
+                const { inviteCode } = req.body;
+                
+                if (!inviteCode) {
+                    return res.status(400).json({ error: 'inviteCode requis' });
+                }
+
+                const result = await this.discordController.joinServer(inviteCode);
+                res.json(result);
+                
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Route pour traiter une commande IA via API
+        this.app.post('/api/process-command', async (req, res) => {
+            try {
+                const { command, chatId } = req.body;
+                
+                if (!command) {
+                    return res.status(400).json({ error: 'command requis' });
+                }
+
+                const result = await this.aiProcessor.processCommand(command, chatId || 'api');
+                res.json(result);
+                
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Route d'accueil
+        this.app.get('/', (req, res) => {
+            res.json({
+                name: 'Discord AI Master',
+                version: '2.0.0-ultra',
+                status: this.isRunning ? 'running' : 'stopped',
+                endpoints: [
+                    'GET /health',
+                    'GET /stats',
+                    'POST /api/send-message',
+                    'POST /api/send-dm',
+                    'POST /api/add-friend',
+                    'POST /api/join-server',
+                    'POST /api/process-command'
+                ]
+            });
         });
 
         console.log('🌐 Express server configuré');
     }
 
-    async setupComponents() {
+    async initialize() {
         try {
             console.log('🔧 Initialisation des composants...');
 
@@ -76,43 +162,43 @@ class DiscordAIApp {
             this.validateEnvironment();
 
             // 1. Contrôleur Discord
-            this.discordController = new DiscordAIController(process.env.DISCORD_TOKEN);
-            console.log('✅ Contrôleur Discord initialisé');
-
+            console.log('📱 Initialisation Discord...');
+            this.discordController = new UltraDiscordController(process.env.DISCORD_TOKEN);
+            
             // 2. Processeur IA
-            this.aiProcessor = new DiscordAIProcessor(
-                process.env.OPENAI_API_KEY, 
+            console.log('🧠 Initialisation IA...');
+            this.aiProcessor = new AdvancedAIProcessor(
+                process.env.OPENAI_API_KEY,
                 this.discordController
             );
-            console.log('✅ Processeur IA initialisé');
-
+            
             // 3. Bot Telegram
-            this.telegramBot = new DiscordAITelegramBot(
+            console.log('🤖 Initialisation Telegram...');
+            this.telegramBot = new UltraTelegramBot(
                 process.env.TELEGRAM_TOKEN,
                 this.discordController,
                 this.aiProcessor
             );
-            console.log('✅ Bot Telegram initialisé');
 
-            console.log('🎉 Tous les composants initialisés avec succès !');
+            console.log('✅ Tous les composants initialisés !');
 
         } catch (error) {
             console.error('❌ Erreur initialisation:', error);
-            process.exit(1);
+            throw error;
         }
     }
 
     validateEnvironment() {
         const required = [
             'DISCORD_TOKEN',
-            'TELEGRAM_TOKEN', 
+            'TELEGRAM_TOKEN',
             'OPENAI_API_KEY'
         ];
 
         const missing = required.filter(key => !process.env[key]);
         
         if (missing.length > 0) {
-            throw new Error(`Variables d'environnement manquantes: ${missing.join(', ')}`);
+            throw new Error(`❌ Variables manquantes: ${missing.join(', ')}`);
         }
 
         console.log('✅ Variables d\'environnement validées');
@@ -125,44 +211,48 @@ class DiscordAIApp {
                 return;
             }
 
-            console.log('🚀 Démarrage du système Discord AI...');
+            console.log('\n🚀 Démarrage de DISCORD AI MASTER...\n');
 
-            // 1. Connexion Discord
+            // Initialiser les composants
+            await this.initialize();
+
+            // Connexion Discord
+            console.log('🔗 Connexion à Discord...');
             const discordConnected = await this.discordController.connect();
+            
             if (!discordConnected) {
-                throw new Error('Échec connexion Discord');
+                throw new Error('❌ Échec connexion Discord');
             }
 
-            // 2. Démarrage serveur Express
+            // Démarrage serveur Express
             this.server = this.app.listen(this.port, () => {
-                console.log(`🌐 Serveur web démarré sur le port ${this.port}`);
-                console.log(`📊 Dashboard: http://localhost:${this.port}`);
+                console.log(`\n🌐 API REST démarrée sur http://localhost:${this.port}`);
             });
 
             this.isRunning = true;
 
-            console.log('🎉 Système Discord AI démarré avec succès !');
             this.showWelcomeMessage();
 
+            console.log('\n✅ SYSTÈME OPÉRATIONNEL !\n');
+
         } catch (error) {
-            console.error('❌ Erreur démarrage:', error);
+            console.error('\n❌ Erreur démarrage:', error.message);
             await this.stop();
-            throw error;
+            process.exit(1);
         }
     }
 
     async stop() {
         try {
-            console.log('🛑 Arrêt du système Discord AI...');
+            console.log('\n🛑 Arrêt du système...');
 
             if (this.server) {
                 this.server.close();
-                console.log('🌐 Serveur web arrêté');
+                console.log('🌐 API REST arrêtée');
             }
 
             if (this.discordController) {
                 await this.discordController.disconnect();
-                console.log('🔌 Discord déconnecté');
             }
 
             if (this.telegramBot && this.telegramBot.bot) {
@@ -170,12 +260,12 @@ class DiscordAIApp {
                     await this.telegramBot.bot.stopPolling();
                     console.log('📱 Bot Telegram arrêté');
                 } catch (error) {
-                    console.error('❌ Erreur arrêt Telegram:', error.message);
+                    // Ignorer les erreurs de polling
                 }
             }
 
             this.isRunning = false;
-            console.log('✅ Système arrêté proprement');
+            console.log('✅ Système arrêté proprement\n');
 
         } catch (error) {
             console.error('❌ Erreur arrêt:', error);
@@ -190,77 +280,83 @@ class DiscordAIApp {
     }
 
     showWelcomeMessage() {
+        const client = this.discordController.getClient();
+        
         console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                    🤖 DISCORD AI CONTROLLER 🤖               ║
-╠══════════════════════════════════════════════════════════════╣
-║                                                              ║
-║  🎮 Discord: ${this.discordController?.getConnectionStatus() ? '✅ Connecté' : '❌ Déconnecté'}
-║  📱 Telegram: ✅ Bot actif
-║  🧠 IA: ✅ OpenAI configuré
-║  🌐 Web: ✅ http://localhost:${this.port}
-║                                                              ║
-║  📋 Commandes Telegram:                                      ║
-║  • /start - Démarrer le bot                                  ║
-║  • /menu - Menu principal                                    ║
-║  • /status - Statut Discord                                  ║
-║  • /help - Aide complète                                     ║
-║                                                              ║
-║  💬 Exemples de commandes IA:                                ║
-║  • "Répond 'salut' à Anthony0707"                           ║
-║  • "Envoie un message sur Gaming"                            ║
-║  • "Montre les derniers messages"                            ║
-║                                                              ║
-║  💰 Coûts IA optimisés pour 300k+ requêtes                  ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════╗
+║                 🚀 DISCORD AI MASTER v2.0 🚀                    ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                  ║
+║  ✅ Discord      : ${client.user.tag.padEnd(40)} ║
+║  ✅ Telegram     : Bot actif                                    ║
+║  ✅ IA           : OpenAI ${process.env.AI_MODEL.padEnd(29)} ║
+║  ✅ API REST     : http://localhost:${this.port}                         ║
+║                                                                  ║
+║  📱 TELEGRAM                                                     ║
+║  • /start  - Démarrer                                           ║
+║  • /menu   - Menu principal                                     ║
+║  • /status - Statut Discord                                     ║
+║  • /help   - Aide complète                                      ║
+║                                                                  ║
+║  🧠 FONCTIONNALITÉS IA                                          ║
+║  • Envoi de messages et DMs ultra-réalistes                     ║
+║  • Gestion des amis et serveurs                                 ║
+║  • Compréhension du langage naturel                             ║
+║  • Actions multiples en séquence                                ║
+║  • Génération de messages humains                               ║
+║                                                                  ║
+║  🌐 API REST ENDPOINTS                                          ║
+║  • POST /api/send-message                                       ║
+║  • POST /api/send-dm                                            ║
+║  • POST /api/add-friend                                         ║
+║  • POST /api/join-server                                        ║
+║  • POST /api/process-command                                    ║
+║                                                                  ║
+║  💰 Coûts optimisés : ~300k requêtes pour 5$                   ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
         `);
     }
 
-    // Gestion propre de l'arrêt
     setupGracefulShutdown() {
         process.on('SIGINT', async () => {
-            console.log('\n🛑 Signal SIGINT reçu, arrêt en cours...');
+            console.log('\n🛑 Signal SIGINT reçu...');
             await this.stop();
             process.exit(0);
         });
 
         process.on('SIGTERM', async () => {
-            console.log('\n🛑 Signal SIGTERM reçu, arrêt en cours...');
+            console.log('\n🛑 Signal SIGTERM reçu...');
             await this.stop();
             process.exit(0);
         });
 
         process.on('uncaughtException', async (error) => {
-            console.error('❌ Exception non gérée:', error.message || error);
-            if (error.message && error.message.includes('ETELEGRAM')) {
-                console.log('⚠️ Erreur Telegram ignorée - Le bot continue de fonctionner');
-                return;
+            console.error('\n❌ Exception non gérée:', error.message);
+            if (!error.message.includes('ETELEGRAM')) {
+                await this.stop();
+                process.exit(1);
             }
-            await this.stop();
-            process.exit(1);
         });
 
-        process.on('unhandledRejection', async (reason, promise) => {
-            console.error('❌ Promesse rejetée non gérée:', reason.message || reason);
-            if (reason.message && reason.message.includes('ETELEGRAM')) {
-                console.log('⚠️ Erreur Telegram ignorée - Le bot continue de fonctionner');
-                return;
+        process.on('unhandledRejection', async (reason) => {
+            console.error('\n❌ Promesse rejetée:', reason);
+            if (reason && !reason.message?.includes('ETELEGRAM')) {
+                await this.stop();
+                process.exit(1);
             }
-            await this.stop();
-            process.exit(1);
         });
     }
 }
 
 // Fonction principale
 async function main() {
-    const app = new DiscordAIApp();
+    const app = new DiscordAIMasterApp();
     
     // Configuration arrêt propre
     app.setupGracefulShutdown();
     
-    // Démarrage automatique
+    // Démarrage
     await app.start();
     
     // Garder le processus actif
@@ -270,9 +366,9 @@ async function main() {
 // Lancement
 if (require.main === module) {
     main().catch(error => {
-        console.error('❌ Erreur fatale:', error);
+        console.error('\n❌ Erreur fatale:', error);
         process.exit(1);
     });
 }
 
-module.exports = DiscordAIApp;
+module.exports = DiscordAIMasterApp;

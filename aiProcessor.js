@@ -1,16 +1,14 @@
 const OpenAI = require('openai');
 
-class DiscordAIProcessor {
+class AdvancedAIProcessor {
     constructor(apiKey, discordController) {
-        this.openai = new OpenAI({
-            apiKey: apiKey
-        });
+        this.openai = new OpenAI({ apiKey });
         this.discordController = discordController;
-        this.commandCache = new Map();
+        this.conversationHistory = new Map();
         this.requestCount = 0;
         this.maxRequests = 300000;
         
-        console.log('🧠 Processeur IA Ultra-Intelligent initialisé');
+        console.log('🧠 Processeur IA Avancé initialisé');
     }
 
     async processCommand(userInput, chatId) {
@@ -20,361 +18,375 @@ class DiscordAIProcessor {
             if (this.requestCount > this.maxRequests) {
                 return {
                     success: false,
-                    message: "⚠️ Limite de requêtes IA atteinte (5$ épuisés)"
+                    message: "⚠️ Limite de requêtes IA atteinte"
                 };
             }
 
-            // Essayer d'abord le fallback intelligent (plus rapide et gratuit)
-            const fallbackResult = this.intelligentFallback(userInput);
-            
-            if (fallbackResult.action !== 'ask_clarification') {
-                console.log('💾 Fallback intelligent utilisé - aucun appel API');
-                return await this.executeCommand(fallbackResult, chatId);
-            }
+            console.log(`📥 Traitement requête: "${userInput}"`);
 
-            // Si le fallback ne comprend pas, utiliser l'IA
-            console.log('🤖 Utilisation de l\'IA OpenAI...');
-            const analysis = await this.analyzeCommand(userInput);
-            return await this.executeCommand(analysis, chatId);
+            // Analyser l'intention avec l'IA
+            const analysis = await this.analyzeIntention(userInput, chatId);
+            
+            // Exécuter les actions
+            return await this.executeActions(analysis, chatId);
 
         } catch (error) {
             console.error('Erreur processeur IA:', error);
             return {
                 success: false,
-                message: `Erreur IA: ${error.message}`
+                message: `❌ Erreur IA: ${error.message}`
             };
         }
     }
 
-    intelligentFallback(userInput) {
-        const input = userInput.toLowerCase();
-        console.log('💾 Analyse fallback intelligent:', input);
+    async analyzeIntention(userInput, chatId) {
+        // Récupérer l'historique de conversation
+        const history = this.conversationHistory.get(chatId) || [];
         
-        // 1. Patterns pour répondre à quelqu'un
-        const replyPatterns = [
-            { 
-                regex: /(?:répond[s]?|dis|envoie)\s+['"]([^'"]+)['"]\s+(?:à|a)\s+(?:@)?([^\s]+)/i,
-                extract: (m) => {
-                    const username = m[2].replace(/[#@]/g, '');
-                    return { username, content: m[1] };
-                }
-            },
-            { 
-                regex: /(?:dis|répond[s]?)\s+(?:à|a)\s+(?:@)?([^\s]+)\s+(?:de\s+)?['"]?([^'"]+)['"]?/i,
-                extract: (m) => {
-                    const username = m[1].replace(/[#@]/g, '');
-                    return { username, content: m[2] };
-                }
-            },
+        // Construire le contexte
+        const contextMessages = [
             {
-                regex: /(?:dis|répond[s]?)\s+(?:lui|leur)\s+['"]([^'"]+)['"]/i,
-                extract: (m) => ({ username: 'last_conversation', content: m[1] })
+                role: "system",
+                content: `Tu es un assistant IA pour Discord. Tu dois analyser les demandes de l'utilisateur et les convertir en actions Discord.
+
+Actions disponibles:
+1. SEND_MESSAGE - Envoyer un message sur un channel
+2. SEND_DM - Envoyer un message privé à quelqu'un
+3. ADD_FRIEND - Ajouter quelqu'un en ami
+4. JOIN_SERVER - Rejoindre un serveur Discord
+5. REACT - Réagir à un message
+6. SET_STATUS - Changer le statut
+7. SEARCH_USER - Chercher un utilisateur
+8. GET_MESSAGES - Récupérer des messages
+
+Tu dois répondre en JSON avec cette structure:
+{
+    "actions": [
+        {
+            "type": "SEND_DM",
+            "params": {
+                "username": "nom_utilisateur",
+                "message": "message à envoyer",
+                "typing": true
+            },
+            "order": 1
+        }
+    ],
+    "reasoning": "explication de ce que tu vas faire",
+    "human_response": "réponse naturelle et amicale pour l'utilisateur"
+}
+
+IMPORTANT: 
+- Génère des messages TRÈS naturels et humains
+- Varie les formulations
+- Ajoute des émojis de manière naturelle
+- Sois conversationnel et amical
+- Pour des messages Discord, fais-les courts et naturels`
             }
         ];
+
+        // Ajouter l'historique récent
+        history.slice(-5).forEach(msg => {
+            contextMessages.push(msg);
+        });
+
+        // Ajouter la requête actuelle
+        contextMessages.push({
+            role: "user",
+            content: userInput
+        });
+
+        // Appel à l'API OpenAI
+        const response = await this.openai.chat.completions.create({
+            model: process.env.AI_MODEL || 'gpt-3.5-turbo',
+            messages: contextMessages,
+            max_tokens: parseInt(process.env.AI_MAX_TOKENS) || 500,
+            temperature: parseFloat(process.env.AI_TEMPERATURE) || 0.8,
+            response_format: { type: "json_object" }
+        });
+
+        const aiResponse = JSON.parse(response.choices[0].message.content);
         
-        for (const pattern of replyPatterns) {
-            const match = input.match(pattern.regex);
-            if (match) {
-                const data = pattern.extract(match);
-                console.log('✅ Détecté: Réponse à un utilisateur -', data);
-                return {
-                    action: "reply_to_user",
-                    params: data,
-                    reasoning: "Détection de commande de réponse"
-                };
-            }
+        // Mettre à jour l'historique
+        history.push(
+            { role: "user", content: userInput },
+            { role: "assistant", content: JSON.stringify(aiResponse) }
+        );
+        
+        if (history.length > 20) {
+            history.splice(0, history.length - 20);
         }
         
-        // 2. Messages généraux sur un channel
-        const messagePatterns = [
-            { 
-                regex: /(?:envoie|écris|poste|dis)\s+['"]([^'"]+)['"]\s+(?:sur|dans)\s+(?:#)?([^\s]+)/i,
-                extract: (m) => ({ target: m[2], content: m[1] })
-            },
-            { 
-                regex: /(?:envoie|écris)\s+(?:un\s+)?(?:message\s+)?['"]?([^'"]+)['"]?/i,
-                extract: (m) => ({ target: 'current_channel', content: m[1] })
-            }
-        ];
+        this.conversationHistory.set(chatId, history);
+
+        console.log('🧠 Analyse IA:', aiResponse.reasoning);
         
-        for (const pattern of messagePatterns) {
-            const match = input.match(pattern.regex);
-            if (match) {
-                const data = pattern.extract(match);
-                console.log('✅ Détecté: Message général -', data);
-                return {
-                    action: "send_message",
-                    params: data,
-                    reasoning: "Envoi de message général"
-                };
-            }
-        }
+        return aiResponse;
+    }
+
+    async executeActions(analysis, chatId) {
+        const results = [];
+        const actions = analysis.actions || [];
         
-        // 3. Réactions
-        const reactionPatterns = [
-            { 
-                regex: /réagis\s+(?:avec\s+)?([👍👎❤️😂😮😢😡🔥💯✨🎉])/i,
-                emoji: (m) => m[1]
-            },
-            { 
-                regex: /mets?\s+(?:un\s+)?(pouce|coeur|rire|feu|like)/i,
-                emoji: (m) => {
-                    const map = { 
-                        pouce: '👍',
-                        like: '👍',
-                        coeur: '❤️',
-                        rire: '😂',
-                        feu: '🔥'
-                    };
-                    return map[m[1]] || '👍';
+        // Trier par ordre
+        actions.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        for (const action of actions) {
+            try {
+                let result;
+                
+                switch (action.type) {
+                    case 'SEND_DM':
+                        result = await this.executeSendDM(action.params);
+                        break;
+                    
+                    case 'SEND_MESSAGE':
+                        result = await this.executeSendMessage(action.params);
+                        break;
+                    
+                    case 'ADD_FRIEND':
+                        result = await this.executeAddFriend(action.params);
+                        break;
+                    
+                    case 'JOIN_SERVER':
+                        result = await this.executeJoinServer(action.params);
+                        break;
+                    
+                    case 'REACT':
+                        result = await this.executeReact(action.params);
+                        break;
+                    
+                    case 'SET_STATUS':
+                        result = await this.executeSetStatus(action.params);
+                        break;
+                    
+                    case 'SEARCH_USER':
+                        result = await this.executeSearchUser(action.params);
+                        break;
+                    
+                    case 'GET_MESSAGES':
+                        result = await this.executeGetMessages(action.params);
+                        break;
+                    
+                    default:
+                        result = { success: false, error: `Action inconnue: ${action.type}` };
                 }
+                
+                results.push({ action: action.type, ...result });
+                
+                // Délai entre les actions pour être plus naturel
+                if (actions.length > 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+                
+            } catch (error) {
+                console.error(`Erreur action ${action.type}:`, error);
+                results.push({ 
+                    action: action.type, 
+                    success: false, 
+                    error: error.message 
+                });
             }
-        ];
-        
-        for (const pattern of reactionPatterns) {
-            const match = input.match(pattern.regex);
-            if (match) {
-                const emoji = pattern.emoji(match);
-                console.log('✅ Détecté: Réaction -', emoji);
-                return {
-                    action: "react_to_message",
-                    params: { emoji },
-                    reasoning: "Ajout de réaction"
-                };
-            }
         }
+
+        // Construire la réponse finale
+        const allSuccess = results.every(r => r.success !== false);
         
-        // 4. Consultation de messages
-        if (input.includes('montre') || input.includes('affiche') || input.includes('voir') || input.includes('dit quoi') || input.includes('messages')) {
-            console.log('✅ Détecté: Consultation de messages');
-            return {
-                action: "show_recent",
-                params: {
-                    channel: "current",
-                    limit: 10
-                },
-                reasoning: "Affichage des messages récents"
-            };
-        }
-        
-        // 5. Statut typing
-        if (input.includes('typing') || input.includes('écri') || input.includes('tape')) {
-            console.log('✅ Détecté: Statut d\'écriture');
-            return {
-                action: "typing_status",
-                params: { enable: true },
-                reasoning: "Activation du statut d'écriture"
-            };
-        }
-        
-        // Si rien ne match
-        console.log('❓ Aucun pattern détecté');
         return {
-            action: "ask_clarification",
-            params: {
-                original_input: userInput,
-                suggestions: [
-                    "• Essayez: \"Répond 'salut' à @username\"",
-                    "• Essayez: \"Envoie 'message' sur le channel\"",
-                    "• Essayez: \"Montre les messages récents\"",
-                    "• Essayez: \"Réagis avec 👍\""
-                ]
-            },
-            reasoning: "Intention peu claire"
+            success: allSuccess,
+            message: analysis.human_response || this.generateHumanResponse(results),
+            results: results,
+            reasoning: analysis.reasoning
         };
     }
 
-    async executeCommand(analysis, chatId) {
-        try {
-            if (analysis.reasoning) {
-                console.log(`💭 Raisonnement: ${analysis.reasoning}`);
-            }
-            
-            const action = analysis.action || analysis.params?.action;
-            
-            switch (action) {
-                case 'reply_to_user':
-                    return await this.handleReplyToUser(analysis.params || analysis, chatId);
-                
-                case 'send_message':
-                    return await this.handleSendMessage(analysis.params || analysis, chatId);
-                
-                case 'react_to_message':
-                    return await this.handleReactToMessage(analysis.params || analysis, chatId);
-                
-                case 'show_recent':
-                    return await this.handleShowRecent(analysis.params || analysis, chatId);
-                
-                case 'typing_status':
-                    return await this.handleTypingStatus(analysis.params || analysis, chatId);
-                
-                case 'ask_clarification':
-                    return {
-                        success: true,
-                        message: `❓ Je n'ai pas bien compris.\n\n${(analysis.params?.suggestions || []).join('\n')}`
-                    };
-                
-                default:
-                    return {
-                        success: false,
-                        message: `❓ Commande non reconnue.\n\nEssayez:\n• "Répond 'salut' à @username"\n• "Envoie 'message' sur le channel"\n• "Montre les messages récents"\n• "Réagis avec 👍"`
-                    };
-            }
-        } catch (error) {
-            return {
-                success: false,
-                message: `❌ Erreur: ${error.message}`
-            };
-        }
+    // ========== EXÉCUTION DES ACTIONS ==========
+    
+    async executeSendDM(params) {
+        const { username, message, typing = true } = params;
+        
+        const options = {
+            typing,
+            typingDelay: 1500 + Math.random() * 1500 // Délai naturel
+        };
+        
+        await this.discordController.sendDMByUsername(username, message, options);
+        
+        return { 
+            success: true, 
+            message: `DM envoyé à ${username}` 
+        };
     }
 
-    async handleReplyToUser(params, chatId) {
-        try {
-            let username = params.username;
-            let content = params.content;
-            
-            // Gestion du "last_conversation"
-            if (username === 'last_conversation') {
-                const recent = await this.discordController.getRecentMessages(10);
-                if (recent.length > 0) {
-                    const lastUser = recent.find(msg => msg.author !== this.discordController.client?.user?.tag);
-                    if (lastUser) {
-                        username = lastUser.author.split('#')[0];
-                        console.log(`🎯 Dernière conversation: ${username}`);
-                    }
-                }
+    async executeSendMessage(params) {
+        const { channelId, message, typing = true } = params;
+        
+        const options = {
+            typing,
+            typingDelay: 1500 + Math.random() * 1500
+        };
+        
+        await this.discordController.sendMessage(channelId, message, options);
+        
+        return { 
+            success: true, 
+            message: `Message envoyé sur le channel` 
+        };
+    }
+
+    async executeAddFriend(params) {
+        const { username } = params;
+        
+        const result = await this.discordController.addFriendByUsername(username);
+        
+        return { 
+            success: true, 
+            message: `Demande d'ami envoyée à ${result.user}` 
+        };
+    }
+
+    async executeJoinServer(params) {
+        const { inviteCode } = params;
+        
+        const result = await this.discordController.joinServer(inviteCode);
+        
+        return { 
+            success: true, 
+            message: `Serveur "${result.guild}" rejoint` 
+        };
+    }
+
+    async executeReact(params) {
+        const { messageId, channelId, emoji } = params;
+        
+        await this.discordController.reactToMessage(messageId, channelId, emoji);
+        
+        return { 
+            success: true, 
+            message: `Réaction ${emoji} ajoutée` 
+        };
+    }
+
+    async executeSetStatus(params) {
+        const { status, activityType, activityName } = params;
+        
+        await this.discordController.setStatus(status, activityType, activityName);
+        
+        return { 
+            success: true, 
+            message: `Statut changé: ${status}` 
+        };
+    }
+
+    async executeSearchUser(params) {
+        const { username } = params;
+        
+        const user = await this.discordController.findUserByName(username);
+        
+        if (!user) {
+            return { 
+                success: false, 
+                message: `Utilisateur "${username}" introuvable` 
+            };
+        }
+        
+        return { 
+            success: true, 
+            message: `Utilisateur trouvé: ${user.tag}`,
+            user: {
+                id: user.id,
+                tag: user.tag,
+                username: user.username
             }
-            
-            await this.discordController.startTyping();
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            await this.discordController.sendDMToUser(username, content);
-            await this.discordController.stopTyping();
-            
-            return {
-                success: true,
-                message: `✅ DM envoyé à ${username}: "${content}"`
-            };
-            
-        } catch (error) {
-            await this.discordController.stopTyping();
-            return {
-                success: false,
-                message: `❌ ${error.message}`
-            };
-        }
+        };
     }
 
-    async handleSendMessage(params, chatId) {
-        try {
-            let target = params.target || 'current_channel';
-            let content = params.content;
-            
-            await this.discordController.startTyping();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            await this.discordController.sendMessage(target, content);
-            await this.discordController.stopTyping();
-            
-            return {
-                success: true,
-                message: `✅ Message envoyé: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`
-            };
-            
-        } catch (error) {
-            await this.discordController.stopTyping();
-            return {
-                success: false,
-                message: `❌ ${error.message}`
-            };
-        }
+    async executeGetMessages(params) {
+        const { channelId, limit = 10 } = params;
+        
+        const messages = await this.discordController.getChannelMessages(channelId, limit);
+        
+        return { 
+            success: true, 
+            message: `${messages.length} messages récupérés`,
+            messages: messages
+        };
     }
 
-    async handleReactToMessage(params, chatId) {
+    // ========== GÉNÉRATION DE MESSAGES HUMAINS ==========
+    
+    async generateHumanMessage(context, style = 'casual') {
         try {
-            await this.discordController.reactToLastMessage(params.emoji);
-            
-            return {
-                success: true,
-                message: `✅ Réaction ${params.emoji} ajoutée !`
-            };
-            
-        } catch (error) {
-            return {
-                success: false,
-                message: `❌ ${error.message}`
-            };
-        }
-    }
+            const prompt = `Génère un message Discord très naturel et humain basé sur ce contexte: ${context}
 
-    async handleShowRecent(params, chatId) {
-        try {
-            const limit = params.limit || 5;
-            const messages = await this.discordController.getRecentMessages(limit);
-            
-            if (messages.length === 0) {
-                return {
-                    success: true,
-                    message: "📭 Aucun message récent. Attendez que des messages arrivent sur Discord."
-                };
-            }
-            
-            let messageText = `📨 Messages récents (${messages.length}):\n\n`;
-            messages.forEach((msg, index) => {
-                const time = new Date(msg.timestamp).toLocaleTimeString('fr-FR', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
-                const preview = msg.content.substring(0, 60);
-                messageText += `${index + 1}. ${msg.author} (${time})\n`;
-                messageText += `   ${msg.channel}\n`;
-                messageText += `   "${preview}${msg.content.length > 60 ? '...' : ''}"\n\n`;
+Style: ${style}
+
+Le message doit être:
+- Court (1-3 phrases max)
+- Naturel et conversationnel
+- Sans formalité excessive
+- Avec des émojis occasionnels
+- Comme un vrai humain qui écrit vite
+
+Réponds uniquement avec le message, sans guillemets.`;
+
+            const response = await this.openai.chat.completions.create({
+                model: process.env.AI_MODEL || 'gpt-3.5-turbo',
+                messages: [{ role: "user", content: prompt }],
+                max_tokens: 100,
+                temperature: 0.9
             });
-            
-            return {
-                success: true,
-                message: messageText
-            };
+
+            return response.choices[0].message.content.trim();
             
         } catch (error) {
-            return {
-                success: false,
-                message: `❌ ${error.message}`
-            };
+            console.error('Erreur génération message:', error);
+            // Fallback sur des messages prédéfinis
+            const fallbacks = [
+                "ok 👍",
+                "d'acc",
+                "ça marche !",
+                "ok parfait",
+                "nickel"
+            ];
+            return fallbacks[Math.floor(Math.random() * fallbacks.length)];
         }
     }
 
-    async handleTypingStatus(params, chatId) {
-        try {
-            if (params.enable) {
-                await this.discordController.startTyping();
-                return {
-                    success: true,
-                    message: "⌨️ Statut 'en train d'écrire' activé"
-                };
-            } else {
-                await this.discordController.stopTyping();
-                return {
-                    success: true,
-                    message: "✅ Statut désactivé"
-                };
-            }
-        } catch (error) {
-            return {
-                success: false,
-                message: `❌ ${error.message}`
-            };
+    generateHumanResponse(results) {
+        const successCount = results.filter(r => r.success !== false).length;
+        const totalCount = results.length;
+        
+        if (successCount === 0) {
+            return "❌ Désolé, je n'ai pas pu effectuer l'action demandée.";
         }
+        
+        if (successCount === totalCount) {
+            const responses = [
+                "✅ C'est fait !",
+                "✅ Voilà, c'est réglé 👍",
+                "✅ Terminé !",
+                "✅ Nickel, c'est bon !",
+                "✅ Parfait, tout est ok !"
+            ];
+            return responses[Math.floor(Math.random() * responses.length)];
+        }
+        
+        return `⚠️ ${successCount}/${totalCount} actions effectuées avec succès.`;
     }
 
     getStats() {
         return {
             requestsUsed: this.requestCount,
             requestsLeft: this.maxRequests - this.requestCount,
-            cacheHits: this.commandCache.size,
+            conversations: this.conversationHistory.size,
             estimatedCost: (this.requestCount * 0.000002).toFixed(6)
         };
     }
+
+    clearConversation(chatId) {
+        this.conversationHistory.delete(chatId);
+    }
 }
 
-module.exports = DiscordAIProcessor;
+module.exports = AdvancedAIProcessor;

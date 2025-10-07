@@ -1,70 +1,55 @@
 const { Client } = require('discord.js-selfbot-v13');
 
-class DiscordAIController {
+class UltraDiscordController {
     constructor(token) {
         this.client = new Client({
             checkUpdate: false,
-            partials: ['CHANNEL', 'MESSAGE', 'USER']
+            partials: ['CHANNEL', 'MESSAGE', 'USER', 'GUILD_MEMBER']
         });
         this.token = token;
         this.isConnected = false;
-        this.typingChannels = new Set();
-        this.recentMessages = [];
+        this.messageHistory = [];
         this.lastUsedChannel = null;
         this.setupClient();
     }
 
     setupClient() {
-        console.log('🎮 Initialisation du contrôleur Discord...');
+        console.log('🚀 Initialisation du contrôleur Discord Ultra-Puissant...');
 
         this.client.on('ready', () => {
             console.log(`✅ Discord connecté: ${this.client.user.tag}`);
             this.isConnected = true;
-            
-            // Trouver un channel par défaut au démarrage
-            const defaultChannel = this.client.channels.cache.find(ch => {
-                if (ch.type !== 'GUILD_TEXT' && ch.type !== 0) return false;
-                const permissions = ch.permissionsFor(this.client.user);
-                return permissions && 
-                       permissions.has('SEND_MESSAGES') && 
-                       permissions.has('VIEW_CHANNEL');
-            });
-            
-            if (defaultChannel) {
-                this.lastUsedChannel = defaultChannel;
-                console.log(`📍 Channel par défaut: ${defaultChannel.name}`);
-            } else {
-                console.log('⚠️ Aucun channel par défaut trouvé - configurez-en un avec /setchannel');
-            }
-        });
-
-        this.client.on('error', (error) => {
-            console.error('❌ Erreur Discord:', error.message);
-            this.isConnected = false;
         });
 
         this.client.on('messageCreate', (message) => {
-            // Stocker les messages récents et mettre à jour le dernier channel
+            // Historique des messages
+            this.messageHistory.unshift({
+                id: message.id,
+                content: message.content,
+                author: message.author.tag,
+                authorId: message.author.id,
+                channel: message.channel.name || 'DM',
+                channelId: message.channel.id,
+                timestamp: message.createdTimestamp,
+                guild: message.guild?.name || 'DM',
+                guildId: message.guild?.id
+            });
+
+            if (this.messageHistory.length > 200) {
+                this.messageHistory = this.messageHistory.slice(0, 200);
+            }
+
             if (message.channel.type === 'GUILD_TEXT' || message.channel.type === 0) {
                 const permissions = message.channel.permissionsFor(this.client.user);
                 if (permissions && permissions.has('SEND_MESSAGES')) {
                     this.lastUsedChannel = message.channel;
                 }
             }
-            
-            this.recentMessages.unshift({
-                id: message.id,
-                content: message.content,
-                author: message.author.tag,
-                channel: message.channel.name || 'DM',
-                channelId: message.channel.id,
-                timestamp: message.createdTimestamp,
-                guild: message.guild?.name || 'DM'
-            });
+        });
 
-            if (this.recentMessages.length > 50) {
-                this.recentMessages = this.recentMessages.slice(0, 50);
-            }
+        this.client.on('error', (error) => {
+            console.error('❌ Erreur Discord:', error.message);
+            this.isConnected = false;
         });
     }
 
@@ -80,313 +65,317 @@ class DiscordAIController {
         }
     }
 
-    async disconnect() {
-        try {
-            await this.client.destroy();
-            this.isConnected = false;
-            console.log('🔌 Discord déconnecté');
-        } catch (error) {
-            console.error('❌ Erreur déconnexion:', error.message);
-        }
-    }
-
-    async getStatus() {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
-
-        return {
-            username: this.client.user.tag,
-            id: this.client.user.id,
-            status: 'online',
-            platform: 'desktop',
-            guilds: this.client.guilds.cache.size,
-            channels: this.client.channels.cache.size,
-            users: this.client.users.cache.size,
-            aiEnabled: true,
-            lastChannel: this.lastUsedChannel?.name || 'Aucun'
-        };
-    }
-
-    getAvailableChannelsList() {
-        const channels = Array.from(this.client.channels.cache.values())
-            .filter(ch => {
-                if (!ch.name) return false;
-                const permissions = ch.permissionsFor(this.client.user);
-                return permissions && 
-                       permissions.has('SEND_MESSAGES') && 
-                       permissions.has('VIEW_CHANNEL');
-            })
-            .map(ch => `#${ch.name}`)
-            .slice(0, 10);
-        
-        return channels.length > 0 ? channels.join(', ') : 'Aucun';
-    }
-
-    async sendMessage(target, content) {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
+    // ========== ENVOI DE MESSAGES ==========
+    
+    async sendMessage(targetChannelId, content, options = {}) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
 
         try {
-            let channel;
-
-            if (target === 'current_channel') {
-                // 1. Essayer lastUsedChannel
-                channel = this.lastUsedChannel;
-                
-                // 2. Si pas de lastUsedChannel, chercher dans les messages récents
-                if (!channel && this.recentMessages.length > 0) {
-                    const lastMsg = this.recentMessages[0];
-                    channel = this.client.channels.cache.get(lastMsg.channelId);
-                    
-                    // Vérifier les permissions
-                    if (channel) {
-                        const permissions = channel.permissionsFor(this.client.user);
-                        if (!permissions || !permissions.has('SEND_MESSAGES')) {
-                            channel = null;
-                        }
-                    }
-                }
-                
-                // 3. Si toujours rien, trouver le PREMIER channel ACCESSIBLE
-                if (!channel) {
-                    channel = this.client.channels.cache.find(ch => {
-                        if (ch.type !== 'GUILD_TEXT' && ch.type !== 0) return false;
-                        const permissions = ch.permissionsFor(this.client.user);
-                        return permissions && 
-                               permissions.has('SEND_MESSAGES') && 
-                               permissions.has('VIEW_CHANNEL');
-                    });
-                }
-                
-                if (!channel) {
-                    throw new Error(`❌ Aucun channel accessible trouvé !
-
-📋 Solutions :
-1. Envoyez un message sur Discord manuellement
-2. Utilisez /setchannel dans Telegram pour voir les channels
-3. Définissez un channel : /setdefault [CHANNEL_ID]
-
-💡 Channels disponibles : ${this.getAvailableChannelsList()}`);
-                }
-            } else {
-                // Recherche par ID ou nom
-                channel = this.client.channels.cache.get(target);
-                
-                if (!channel) {
-                    channel = this.client.channels.cache.find(ch => 
-                        ch.name?.toLowerCase().includes(target.toLowerCase())
-                    );
-                }
-                
-                if (!channel) {
-                    throw new Error(`Channel "${target}" non trouvé. Channels disponibles : ${this.getAvailableChannelsList()}`);
-                }
-            }
-
-            // Vérifier les permissions avant d'envoyer
-            const permissions = channel.permissionsFor(this.client.user);
-            if (!permissions || !permissions.has('SEND_MESSAGES')) {
-                throw new Error(`❌ Pas de permission SEND_MESSAGES sur #${channel.name}
-
-🔧 Vérifiez que vous avez les droits sur ce channel Discord.
-💡 Channels accessibles : ${this.getAvailableChannelsList()}`);
+            const channel = await this.client.channels.fetch(targetChannelId);
+            
+            if (options.typing) {
+                await channel.sendTyping();
+                await new Promise(resolve => setTimeout(resolve, options.typingDelay || 2000));
             }
 
             const message = await channel.send(content);
-            this.lastUsedChannel = channel;
-            console.log(`✅ Message envoyé sur #${channel.name}: ${content.substring(0, 50)}`);
+            console.log(`✅ Message envoyé sur #${channel.name}: ${content.substring(0, 50)}...`);
             return message;
-
         } catch (error) {
             console.error('❌ Erreur envoi message:', error.message);
             throw error;
         }
     }
 
-    async sendDMToUser(username, content) {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
+    async sendDM(userId, content, options = {}) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
 
         try {
-            const cleanUsername = username.replace(/[#@]/g, '').split('#')[0].toLowerCase();
-            
-            let user = this.client.users.cache.find(u => {
-                const usernameLower = u.username.toLowerCase();
-                const tagLower = u.tag.toLowerCase();
-                return usernameLower.includes(cleanUsername) || 
-                       tagLower.includes(cleanUsername);
-            });
-
-            if (!user && this.recentMessages.length > 0) {
-                const recentMsg = this.recentMessages.find(msg => 
-                    msg.author.toLowerCase().includes(cleanUsername)
-                );
-                
-                if (recentMsg) {
-                    const authorTag = recentMsg.author;
-                    user = this.client.users.cache.find(u => u.tag === authorTag);
-                }
-            }
-
-            if (!user) {
-                throw new Error(`Utilisateur "${username}" non trouvé. Utilisateurs récents : ${
-                    [...new Set(this.recentMessages.map(m => m.author))].slice(0, 3).join(', ')
-                }`);
-            }
-
+            const user = await this.client.users.fetch(userId);
             const dmChannel = await user.createDM();
-            const message = await dmChannel.send(content);
             
-            console.log(`📩 DM envoyé à ${user.tag}: ${content}`);
-            return message;
+            if (options.typing) {
+                await dmChannel.sendTyping();
+                await new Promise(resolve => setTimeout(resolve, options.typingDelay || 2000));
+            }
 
+            const message = await dmChannel.send(content);
+            console.log(`📩 DM envoyé à ${user.tag}: ${content.substring(0, 50)}...`);
+            return message;
         } catch (error) {
             console.error('❌ Erreur envoi DM:', error.message);
             throw error;
         }
     }
 
-    async reactToLastMessage(emoji) {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
+    async sendDMByUsername(username, content, options = {}) {
+        const user = await this.findUserByName(username);
+        if (!user) throw new Error(`Utilisateur "${username}" introuvable`);
+        return await this.sendDM(user.id, content, options);
+    }
+
+    // ========== GESTION DES AMIS ==========
+    
+    async addFriend(userId) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
 
         try {
-            if (this.recentMessages.length === 0) {
-                throw new Error('Aucun message récent en mémoire');
-            }
+            const user = await this.client.users.fetch(userId);
+            await this.client.relationships.addFriend(user);
+            console.log(`✅ Demande d'ami envoyée à ${user.tag}`);
+            return { success: true, user: user.tag };
+        } catch (error) {
+            console.error('❌ Erreur ajout ami:', error.message);
+            throw error;
+        }
+    }
 
-            const lastMsg = this.recentMessages[0];
-            const channel = this.client.channels.cache.get(lastMsg.channelId);
+    async addFriendByUsername(username) {
+        const user = await this.findUserByName(username);
+        if (!user) throw new Error(`Utilisateur "${username}" introuvable`);
+        return await this.addFriend(user.id);
+    }
+
+    async removeFriend(userId) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        try {
+            const user = await this.client.users.fetch(userId);
+            await this.client.relationships.removeFriend(user);
+            console.log(`✅ ${user.tag} retiré des amis`);
+            return { success: true, user: user.tag };
+        } catch (error) {
+            console.error('❌ Erreur retrait ami:', error.message);
+            throw error;
+        }
+    }
+
+    async getFriends() {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        const friends = [];
+        for (const [userId, relationship] of this.client.relationships.cache) {
+            if (relationship.type === 'FRIEND') {
+                const user = await this.client.users.fetch(userId);
+                friends.push({
+                    id: user.id,
+                    username: user.username,
+                    tag: user.tag,
+                    avatar: user.displayAvatarURL()
+                });
+            }
+        }
+        return friends;
+    }
+
+    // ========== GESTION DES SERVEURS ==========
+    
+    async joinServer(inviteCode) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        try {
+            // Nettoyer le code d'invitation
+            const cleanCode = inviteCode.replace(/https?:\/\/(discord\.gg|discord\.com\/invite)\//g, '');
             
-            if (!channel) {
-                throw new Error('Channel du dernier message non trouvé');
-            }
+            const invite = await this.client.fetchInvite(cleanCode);
+            await invite.acceptInvite();
+            
+            console.log(`✅ Serveur rejoint: ${invite.guild.name}`);
+            return { success: true, guild: invite.guild.name, guildId: invite.guild.id };
+        } catch (error) {
+            console.error('❌ Erreur rejoindre serveur:', error.message);
+            throw error;
+        }
+    }
 
-            const message = await channel.messages.fetch(lastMsg.id);
+    async leaveServer(guildId) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        try {
+            const guild = await this.client.guilds.fetch(guildId);
+            await guild.leave();
+            console.log(`✅ Serveur quitté: ${guild.name}`);
+            return { success: true, guild: guild.name };
+        } catch (error) {
+            console.error('❌ Erreur quitter serveur:', error.message);
+            throw error;
+        }
+    }
+
+    async getServerInfo(guildId) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        const guild = await this.client.guilds.fetch(guildId);
+        const channels = await guild.channels.fetch();
+        
+        return {
+            id: guild.id,
+            name: guild.name,
+            memberCount: guild.memberCount,
+            ownerId: guild.ownerId,
+            createdAt: guild.createdAt,
+            channels: Array.from(channels.values()).map(ch => ({
+                id: ch.id,
+                name: ch.name,
+                type: ch.type
+            }))
+        };
+    }
+
+    async getAllServers() {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        const servers = [];
+        for (const [guildId, guild] of this.client.guilds.cache) {
+            servers.push({
+                id: guild.id,
+                name: guild.name,
+                memberCount: guild.memberCount,
+                icon: guild.iconURL()
+            });
+        }
+        return servers;
+    }
+
+    // ========== RÉACTIONS ET INTERACTIONS ==========
+    
+    async reactToMessage(messageId, channelId, emoji) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        try {
+            const channel = await this.client.channels.fetch(channelId);
+            const message = await channel.messages.fetch(messageId);
             await message.react(emoji);
-            
-            console.log(`👍 Réaction ${emoji} ajoutée au message de ${lastMsg.author}`);
-            return true;
-
+            console.log(`👍 Réaction ${emoji} ajoutée`);
+            return { success: true };
         } catch (error) {
             console.error('❌ Erreur réaction:', error.message);
             throw error;
         }
     }
 
-    async startTyping(channelId = null) {
-        if (!this.isConnected) {
-            return;
-        }
+    async deleteMessage(messageId, channelId) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
 
         try {
-            let channel = channelId ? this.client.channels.cache.get(channelId) : this.lastUsedChannel;
-
-            if (channel && channel.sendTyping) {
-                const permissions = channel.permissionsFor(this.client.user);
-                if (permissions && permissions.has('SEND_MESSAGES')) {
-                    await channel.sendTyping();
-                    this.typingChannels.add(channel.id);
-                    console.log('⌨️ Statut "en train d\'écrire" activé');
-                }
+            const channel = await this.client.channels.fetch(channelId);
+            const message = await channel.messages.fetch(messageId);
+            
+            if (message.author.id !== this.client.user.id) {
+                throw new Error('Impossible de supprimer le message d\'un autre utilisateur');
             }
+            
+            await message.delete();
+            console.log(`🗑️ Message supprimé`);
+            return { success: true };
         } catch (error) {
-            console.error('❌ Erreur statut typing:', error.message);
+            console.error('❌ Erreur suppression message:', error.message);
+            throw error;
         }
     }
 
-    async stopTyping(channelId = null) {
+    async editMessage(messageId, channelId, newContent) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
         try {
-            if (channelId) {
-                this.typingChannels.delete(channelId);
-            } else {
-                this.typingChannels.clear();
+            const channel = await this.client.channels.fetch(channelId);
+            const message = await channel.messages.fetch(messageId);
+            
+            if (message.author.id !== this.client.user.id) {
+                throw new Error('Impossible de modifier le message d\'un autre utilisateur');
             }
-            console.log('✅ Statut "en train d\'écrire" désactivé');
+            
+            await message.edit(newContent);
+            console.log(`✏️ Message modifié`);
+            return { success: true };
         } catch (error) {
-            console.error('❌ Erreur arrêt typing:', error.message);
+            console.error('❌ Erreur modification message:', error.message);
+            throw error;
         }
     }
 
-    async getRecentMessages(limit = 10) {
-        return this.recentMessages.slice(0, limit);
+    // ========== STATUT ET TYPING ==========
+    
+    async setStatus(status, activityType = 'PLAYING', activityName = '') {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        try {
+            await this.client.user.setPresence({
+                status: status, // 'online', 'idle', 'dnd', 'invisible'
+                activities: activityName ? [{
+                    name: activityName,
+                    type: activityType // 'PLAYING', 'STREAMING', 'LISTENING', 'WATCHING'
+                }] : []
+            });
+            console.log(`✅ Statut changé: ${status}`);
+            return { success: true };
+        } catch (error) {
+            console.error('❌ Erreur changement statut:', error.message);
+            throw error;
+        }
     }
 
-    async getServers() {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
+    async startTyping(channelId) {
+        if (!this.isConnected) return;
 
-        const servers = [];
+        try {
+            const channel = await this.client.channels.fetch(channelId);
+            await channel.sendTyping();
+            console.log('⌨️ Statut "en train d\'écrire" activé');
+        } catch (error) {
+            console.error('❌ Erreur typing:', error.message);
+        }
+    }
+
+    // ========== RECHERCHE ET UTILITAIRES ==========
+    
+    async findUserByName(username) {
+        const cleanUsername = username.replace(/[#@]/g, '').toLowerCase();
         
-        this.client.guilds.cache.forEach(guild => {
-            const textChannels = guild.channels.cache.filter(ch => 
-                ch.type === 'GUILD_TEXT' || ch.type === 0
+        // Recherche dans le cache
+        let user = this.client.users.cache.find(u => 
+            u.username.toLowerCase() === cleanUsername ||
+            u.tag.toLowerCase() === cleanUsername ||
+            u.username.toLowerCase().includes(cleanUsername)
+        );
+
+        if (!user && this.messageHistory.length > 0) {
+            const recentMsg = this.messageHistory.find(msg => 
+                msg.author.toLowerCase().includes(cleanUsername)
             );
             
-            servers.push({
-                id: guild.id,
-                name: guild.name,
-                memberCount: guild.memberCount,
-                channels: textChannels.map(ch => ({
-                    id: ch.id,
-                    name: ch.name,
-                    type: ch.type
-                }))
-            });
-        });
-
-        return servers;
-    }
-
-    async getChannels(serverId = null) {
-        if (!this.isConnected) {
-            throw new Error('Discord non connecté');
-        }
-
-        let channels = [];
-
-        if (serverId) {
-            const guild = this.client.guilds.cache.get(serverId);
-            if (guild) {
-                channels = guild.channels.cache
-                    .filter(ch => ch.type === 'GUILD_TEXT' || ch.type === 'GUILD_VOICE' || ch.type === 0 || ch.type === 2)
-                    .map(ch => ({
-                        id: ch.id,
-                        name: ch.name,
-                        type: ch.type,
-                        guild: guild.name,
-                        hasAccess: this.checkChannelAccess(ch)
-                    }));
+            if (recentMsg) {
+                user = await this.client.users.fetch(recentMsg.authorId);
             }
-        } else {
-            channels = this.client.channels.cache
-                .filter(ch => ch.name)
-                .map(ch => ({
-                    id: ch.id,
-                    name: ch.name,
-                    type: ch.type,
-                    guild: ch.guild?.name || 'DM',
-                    hasAccess: this.checkChannelAccess(ch)
-                }));
         }
 
-        return Array.from(channels);
+        return user;
     }
 
-    checkChannelAccess(channel) {
-        try {
-            const permissions = channel.permissionsFor(this.client.user);
-            return permissions && 
-                   permissions.has('VIEW_CHANNEL') && 
-                   permissions.has('SEND_MESSAGES');
-        } catch {
-            return false;
-        }
+    async searchMessages(query, limit = 50) {
+        const results = this.messageHistory
+            .filter(msg => 
+                msg.content.toLowerCase().includes(query.toLowerCase()) ||
+                msg.author.toLowerCase().includes(query.toLowerCase())
+            )
+            .slice(0, limit);
+
+        return results;
+    }
+
+    async getChannelMessages(channelId, limit = 50) {
+        if (!this.isConnected) throw new Error('Discord non connecté');
+
+        const channel = await this.client.channels.fetch(channelId);
+        const messages = await channel.messages.fetch({ limit });
+        
+        return Array.from(messages.values()).map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            author: msg.author.tag,
+            timestamp: msg.createdTimestamp,
+            attachments: msg.attachments.size
+        }));
     }
 
     getConnectionStatus() {
@@ -396,6 +385,16 @@ class DiscordAIController {
     getClient() {
         return this.client;
     }
+
+    async disconnect() {
+        try {
+            await this.client.destroy();
+            this.isConnected = false;
+            console.log('🔌 Discord déconnecté');
+        } catch (error) {
+            console.error('❌ Erreur déconnexion:', error.message);
+        }
+    }
 }
 
-module.exports = DiscordAIController;
+module.exports = UltraDiscordController;
