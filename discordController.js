@@ -10,7 +10,7 @@ class DiscordAIController {
         this.isConnected = false;
         this.typingChannels = new Set();
         this.recentMessages = [];
-        this.lastUsedChannel = null; // Stocker le dernier channel utilisé
+        this.lastUsedChannel = null;
         this.setupClient();
     }
 
@@ -22,14 +22,19 @@ class DiscordAIController {
             this.isConnected = true;
             
             // Trouver un channel par défaut au démarrage
-            const defaultChannel = this.client.channels.cache.find(ch => 
-                (ch.type === 'GUILD_TEXT' || ch.type === 0) && 
-                ch.permissionsFor(this.client.user)?.has('SEND_MESSAGES')
-            );
+            const defaultChannel = this.client.channels.cache.find(ch => {
+                if (ch.type !== 'GUILD_TEXT' && ch.type !== 0) return false;
+                const permissions = ch.permissionsFor(this.client.user);
+                return permissions && 
+                       permissions.has('SEND_MESSAGES') && 
+                       permissions.has('VIEW_CHANNEL');
+            });
             
             if (defaultChannel) {
                 this.lastUsedChannel = defaultChannel;
                 console.log(`📍 Channel par défaut: ${defaultChannel.name}`);
+            } else {
+                console.log('⚠️ Aucun channel par défaut trouvé - configurez-en un avec /setchannel');
             }
         });
 
@@ -41,7 +46,10 @@ class DiscordAIController {
         this.client.on('messageCreate', (message) => {
             // Stocker les messages récents et mettre à jour le dernier channel
             if (message.channel.type === 'GUILD_TEXT' || message.channel.type === 0) {
-                this.lastUsedChannel = message.channel;
+                const permissions = message.channel.permissionsFor(this.client.user);
+                if (permissions && permissions.has('SEND_MESSAGES')) {
+                    this.lastUsedChannel = message.channel;
+                }
             }
             
             this.recentMessages.unshift({
@@ -63,7 +71,6 @@ class DiscordAIController {
     async connect() {
         try {
             await this.client.login(this.token);
-            // Attendre que le client soit vraiment prêt
             await new Promise(resolve => setTimeout(resolve, 3000));
             console.log('🔗 Connexion Discord établie');
             return true;
@@ -101,6 +108,21 @@ class DiscordAIController {
         };
     }
 
+    getAvailableChannelsList() {
+        const channels = Array.from(this.client.channels.cache.values())
+            .filter(ch => {
+                if (!ch.name) return false;
+                const permissions = ch.permissionsFor(this.client.user);
+                return permissions && 
+                       permissions.has('SEND_MESSAGES') && 
+                       permissions.has('VIEW_CHANNEL');
+            })
+            .map(ch => `#${ch.name}`)
+            .slice(0, 10);
+        
+        return channels.length > 0 ? channels.join(', ') : 'Aucun';
+    }
+
     async sendMessage(target, content) {
         if (!this.isConnected) {
             throw new Error('Discord non connecté');
@@ -110,52 +132,71 @@ class DiscordAIController {
             let channel;
 
             if (target === 'current_channel') {
-                // Utiliser le dernier channel où un message a été vu
+                // 1. Essayer lastUsedChannel
                 channel = this.lastUsedChannel;
                 
-                if (!channel) {
-                    // Si pas de lastUsedChannel, chercher dans les messages récents
-                    if (this.recentMessages.length > 0) {
-                        const lastMsg = this.recentMessages[0];
-                        channel = this.client.channels.cache.get(lastMsg.channelId);
+                // 2. Si pas de lastUsedChannel, chercher dans les messages récents
+                if (!channel && this.recentMessages.length > 0) {
+                    const lastMsg = this.recentMessages[0];
+                    channel = this.client.channels.cache.get(lastMsg.channelId);
+                    
+                    // Vérifier les permissions
+                    if (channel) {
+                        const permissions = channel.permissionsFor(this.client.user);
+                        if (!permissions || !permissions.has('SEND_MESSAGES')) {
+                            channel = null;
+                        }
                     }
                 }
                 
+                // 3. Si toujours rien, trouver le PREMIER channel ACCESSIBLE
                 if (!channel) {
-                    // Dernière option : premier channel accessible
-                    channel = this.client.channels.cache.find(ch => 
-                        (ch.type === 'GUILD_TEXT' || ch.type === 0) && 
-                        ch.permissionsFor(this.client.user)?.has('SEND_MESSAGES')
-                    );
+                    channel = this.client.channels.cache.find(ch => {
+                        if (ch.type !== 'GUILD_TEXT' && ch.type !== 0) return false;
+                        const permissions = ch.permissionsFor(this.client.user);
+                        return permissions && 
+                               permissions.has('SEND_MESSAGES') && 
+                               permissions.has('VIEW_CHANNEL');
+                    });
                 }
                 
                 if (!channel) {
-                    throw new Error('Aucun channel accessible trouvé. Essayez d\'abord d\'envoyer un message manuellement sur Discord pour que le bot détecte un channel.');
+                    throw new Error(`❌ Aucun channel accessible trouvé !
+
+📋 Solutions :
+1. Envoyez un message sur Discord manuellement
+2. Utilisez /setchannel dans Telegram pour voir les channels
+3. Définissez un channel : /setdefault [CHANNEL_ID]
+
+💡 Channels disponibles : ${this.getAvailableChannelsList()}`);
                 }
             } else {
+                // Recherche par ID ou nom
                 channel = this.client.channels.cache.get(target);
                 
                 if (!channel) {
-                    // Essayer de trouver par nom
                     channel = this.client.channels.cache.find(ch => 
                         ch.name?.toLowerCase().includes(target.toLowerCase())
                     );
                 }
                 
                 if (!channel) {
-                    throw new Error(`Channel "${target}" non trouvé. Channels disponibles: ${
-                        Array.from(this.client.channels.cache.values())
-                            .filter(ch => ch.name)
-                            .map(ch => ch.name)
-                            .slice(0, 5)
-                            .join(', ')
-                    }`);
+                    throw new Error(`Channel "${target}" non trouvé. Channels disponibles : ${this.getAvailableChannelsList()}`);
                 }
+            }
+
+            // Vérifier les permissions avant d'envoyer
+            const permissions = channel.permissionsFor(this.client.user);
+            if (!permissions || !permissions.has('SEND_MESSAGES')) {
+                throw new Error(`❌ Pas de permission SEND_MESSAGES sur #${channel.name}
+
+🔧 Vérifiez que vous avez les droits sur ce channel Discord.
+💡 Channels accessibles : ${this.getAvailableChannelsList()}`);
             }
 
             const message = await channel.send(content);
             this.lastUsedChannel = channel;
-            console.log(`📤 Message envoyé sur ${channel.name}: ${content.substring(0, 50)}`);
+            console.log(`✅ Message envoyé sur #${channel.name}: ${content.substring(0, 50)}`);
             return message;
 
         } catch (error) {
@@ -170,10 +211,8 @@ class DiscordAIController {
         }
 
         try {
-            // Nettoyer le username (enlever les # et discriminateurs)
             const cleanUsername = username.replace(/[#@]/g, '').split('#')[0].toLowerCase();
             
-            // Chercher dans le cache d'abord
             let user = this.client.users.cache.find(u => {
                 const usernameLower = u.username.toLowerCase();
                 const tagLower = u.tag.toLowerCase();
@@ -181,7 +220,6 @@ class DiscordAIController {
                        tagLower.includes(cleanUsername);
             });
 
-            // Si pas trouvé dans le cache, chercher dans les messages récents
             if (!user && this.recentMessages.length > 0) {
                 const recentMsg = this.recentMessages.find(msg => 
                     msg.author.toLowerCase().includes(cleanUsername)
@@ -194,7 +232,7 @@ class DiscordAIController {
             }
 
             if (!user) {
-                throw new Error(`Utilisateur "${username}" non trouvé. Utilisateurs récents: ${
+                throw new Error(`Utilisateur "${username}" non trouvé. Utilisateurs récents : ${
                     [...new Set(this.recentMessages.map(m => m.author))].slice(0, 3).join(', ')
                 }`);
             }
@@ -246,20 +284,16 @@ class DiscordAIController {
         }
 
         try {
-            let channel;
-
-            if (channelId) {
-                channel = this.client.channels.cache.get(channelId);
-            } else {
-                channel = this.lastUsedChannel;
-            }
+            let channel = channelId ? this.client.channels.cache.get(channelId) : this.lastUsedChannel;
 
             if (channel && channel.sendTyping) {
-                await channel.sendTyping();
-                this.typingChannels.add(channel.id);
-                console.log('⌨️ Statut "en train d\'écrire" activé');
+                const permissions = channel.permissionsFor(this.client.user);
+                if (permissions && permissions.has('SEND_MESSAGES')) {
+                    await channel.sendTyping();
+                    this.typingChannels.add(channel.id);
+                    console.log('⌨️ Statut "en train d\'écrire" activé');
+                }
             }
-
         } catch (error) {
             console.error('❌ Erreur statut typing:', error.message);
         }
@@ -272,7 +306,6 @@ class DiscordAIController {
             } else {
                 this.typingChannels.clear();
             }
-            
             console.log('✅ Statut "en train d\'écrire" désactivé');
         } catch (error) {
             console.error('❌ Erreur arrêt typing:', error.message);
@@ -326,21 +359,34 @@ class DiscordAIController {
                         id: ch.id,
                         name: ch.name,
                         type: ch.type,
-                        guild: guild.name
+                        guild: guild.name,
+                        hasAccess: this.checkChannelAccess(ch)
                     }));
             }
         } else {
             channels = this.client.channels.cache
-                .filter(ch => ch.name) // Filtrer ceux qui ont un nom
+                .filter(ch => ch.name)
                 .map(ch => ({
                     id: ch.id,
                     name: ch.name,
                     type: ch.type,
-                    guild: ch.guild?.name || 'DM'
+                    guild: ch.guild?.name || 'DM',
+                    hasAccess: this.checkChannelAccess(ch)
                 }));
         }
 
         return Array.from(channels);
+    }
+
+    checkChannelAccess(channel) {
+        try {
+            const permissions = channel.permissionsFor(this.client.user);
+            return permissions && 
+                   permissions.has('VIEW_CHANNEL') && 
+                   permissions.has('SEND_MESSAGES');
+        } catch {
+            return false;
+        }
     }
 
     getConnectionStatus() {
